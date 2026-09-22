@@ -49,43 +49,60 @@
   /* ---------- Header / hero ---------- */
   .hero{
     position:relative;
-    padding:34px 4px 22px;
-    overflow:hidden;
+    padding:26px 4px 22px;
+    border-top:1px solid var(--line);
+    margin-top:10px;
   }
-  .hero-route{position:absolute;inset:0;width:100%;height:100%;opacity:0.55;pointer-events:none;}
   .hero-inner{position:relative;z-index:1;}
+  .hero-kicker{
+    display:flex;align-items:center;gap:10px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:10px;
+  }
+  .hero-kicker::after{content:"";flex:1;height:1px;background:var(--line);}
   .trip-name{
     font-family:'Shippori Mincho',serif;
-    font-weight:800;
-    font-size:32px;
-    letter-spacing:0.02em;
+    font-weight:700;
+    font-size:29px;
+    letter-spacing:0.01em;
     margin:0;
-    line-height:1.3;
+    line-height:1.25;
     border:none;background:transparent;color:var(--ink);
     width:100%;
     padding:2px 0;
     outline:none;
   }
   .trip-name:focus{border-bottom:1px dashed var(--amber);}
-  .trip-sub{
-    margin-top:6px;
-    font-size:13px;
-    color:var(--ink-soft);
+  .trip-meta{
+    margin-top:16px;
     display:flex;
-    gap:14px;
     flex-wrap:wrap;
-    align-items:center;
+    font-size:12px;
+    color:var(--ink-soft);
   }
-  .trip-sub b.mono{color:var(--ink);font-weight:600;}
+  .trip-meta-item{
+    display:flex;align-items:baseline;gap:5px;
+    padding-right:14px;margin-right:14px;
+    border-right:1px solid var(--line);
+    white-space:nowrap;
+  }
+  .trip-meta-item:last-child{border-right:none;margin-right:0;padding-right:0;}
+  .trip-meta-item b{font-family:'IBM Plex Mono',monospace;color:var(--ink);font-weight:600;}
+  .hero-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;}
   .share-btn{
-    display:inline-flex;align-items:center;gap:5px;
-    background:transparent;border:1px solid var(--line);color:var(--pine);
-    border-radius:20px;padding:4px 12px 4px 10px;font-size:12px;font-weight:600;
-    cursor:pointer;font-family:inherit;
+    display:inline-flex;align-items:center;gap:6px;
+    background:transparent;border:1px solid var(--line);color:var(--ink-soft);
+    border-radius:var(--radius-sm);padding:7px 12px;font-size:12px;font-weight:600;
+    letter-spacing:0.01em;cursor:pointer;font-family:inherit;text-decoration:none;
   }
+  .share-btn:hover{border-color:var(--pine);color:var(--pine);}
   .share-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;}
-  .share-btn.copied{background:var(--pine-soft);border-color:var(--pine);}
-  .sync-dot{width:7px;height:7px;border-radius:50%;background:#5C9B6B;display:inline-block;}
+  .share-btn.copied{background:var(--pine-soft);border-color:var(--pine);color:var(--pine);}
+  .sync-dot{width:6px;height:6px;border-radius:50%;background:#5C9B6B;display:inline-block;}
   .sync-dot.offline{background:var(--rust);}
 
   /* ---------- Tabs ---------- */
@@ -497,8 +514,9 @@ function renderLauncher(){
   app.innerHTML = `
     <div class="hero">
       <div class="hero-inner">
+        <div class="hero-kicker">Trip Itinerary</div>
         <h1 class="trip-name serif" style="cursor:default;">旅程と精算</h1>
-        <div class="trip-sub"><span>旅行ごとに専用のリンクを作って共有・管理します</span></div>
+        <div class="trip-meta"><span class="trip-meta-item" style="border-right:none;">旅行ごとに専用のリンクを作って共有・管理します</span></div>
       </div>
     </div>
     <div class="panel">
@@ -551,27 +569,21 @@ function render(){
 function renderHero(){
   return `
   <div class="hero">
-    <svg class="hero-route" viewBox="0 0 700 70" preserveAspectRatio="none">
-      <path d="M0,50 C120,10 220,60 340,25 C460,-5 540,45 700,15" fill="none" stroke="#233A55" stroke-width="1.4" stroke-dasharray="1 9" stroke-linecap="round"/>
-      <circle cx="0" cy="50" r="3.5" fill="#233A55"/>
-      <circle cx="230" cy="45" r="3.5" fill="#5C7391"/>
-      <circle cx="460" cy="12" r="3.5" fill="#233A55"/>
-      <g transform="translate(672,10) rotate(20)">
-        <polygon points="0,7 26,0 14,7 26,14" fill="#5C7391"/>
-      </g>
-    </svg>
     <div class="hero-inner">
+      <div class="hero-kicker">Trip Itinerary</div>
       <input class="trip-name serif" id="tripNameInput" value="${esc(state.tripName)}" spellcheck="false">
-      <div class="trip-sub">
-        <span class="sync-dot" id="syncDot" title="同期状態"></span>
-        <span>旅程日数 <b class="mono">${state.itinerary.length}</b> 日</span>
-        <span>メンバー <b class="mono">${state.members.length}</b> 人</span>
-        <span>精算件数 <b class="mono">${state.expenses.length}</b> 件</span>
+      <div class="trip-meta">
+        <span class="trip-meta-item"><span class="sync-dot" id="syncDot" title="同期状態"></span>同期</span>
+        <span class="trip-meta-item">日程 <b>${state.itinerary.length}</b></span>
+        <span class="trip-meta-item">メンバー <b>${state.members.length}</b></span>
+        <span class="trip-meta-item">精算 <b>${state.expenses.length}</b></span>
+      </div>
+      <div class="hero-actions">
         <button class="share-btn" id="shareBtn" type="button">
           <svg viewBox="0 0 24 24"><path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
           共有リンクをコピー
         </button>
-        <a class="share-btn" href="${location.pathname}" style="text-decoration:none;">
+        <a class="share-btn" href="${location.pathname}">
           <svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
           旅行一覧
         </a>
