@@ -924,30 +924,28 @@ function renderExpenseForm(){
 }
 
 /* ---------------- events ---------------- */
+let eventsAttached = false;
 function attachEvents(){
+  if(eventsAttached) return;
+  eventsAttached = true;
   const app = document.getElementById('app');
 
-  const nameInput = document.getElementById('tripNameInput');
-  if(nameInput){
-    nameInput.addEventListener('change', () => {
-      state.tripName = nameInput.value.trim() || '新しい旅行';
+  // delegated so it keeps working after render() replaces #app's innerHTML —
+  // attaching listeners directly to child nodes (recreated on every render)
+  // would otherwise pile up duplicate listeners on the persistent #app node.
+  app.addEventListener('change', (e) => {
+    if(e.target.id === 'tripNameInput'){
+      state.tripName = e.target.value.trim() || '新しい旅行';
       saveMeta();
-    });
-  }
-
-  const shareBtn = document.getElementById('shareBtn');
-  if(shareBtn){
-    shareBtn.addEventListener('click', async () => {
-      try{
-        await navigator.clipboard.writeText(location.href);
-        shareBtn.classList.add('copied');
-        shareBtn.lastChild.textContent = ' コピーしました';
-        setTimeout(() => { shareBtn.classList.remove('copied'); shareBtn.lastChild.textContent = ' 共有リンクをコピー'; }, 1800);
-      }catch(e){
-        prompt('このURLをコピーしてメンバーに共有してください', location.href);
-      }
-    });
-  }
+      return;
+    }
+    const sel = e.target.closest('.member-method-select');
+    if(sel){
+      const m = state.members.find(x => x.id === sel.dataset.id);
+      if(m){ m.method = sel.value; saveMembers(); }
+      return;
+    }
+  });
 
   // live update of custom-split total without full re-render (keeps input focus)
   app.addEventListener('input', (e) => {
@@ -962,16 +960,20 @@ function attachEvents(){
     if(totalEl) totalEl.innerHTML = `合計 <b class="mono">${yen(total)}</b>`;
   });
 
-  app.addEventListener('change', (e) => {
-    const sel = e.target.closest('.member-method-select');
-    if(!sel) return;
-    const m = state.members.find(x => x.id === sel.dataset.id);
-    if(!m) return;
-    m.method = sel.value;
-    saveMembers();
-  });
-
   app.addEventListener('click', async (e) => {
+    const shareBtn = e.target.closest('#shareBtn');
+    if(shareBtn){
+      try{
+        await navigator.clipboard.writeText(location.href);
+        shareBtn.classList.add('copied');
+        shareBtn.lastChild.textContent = ' コピーしました';
+        setTimeout(() => { shareBtn.classList.remove('copied'); shareBtn.lastChild.textContent = ' 共有リンクをコピー'; }, 1800);
+      }catch(err){
+        prompt('このURLをコピーしてメンバーに共有してください', location.href);
+      }
+      return;
+    }
+
     const el = e.target.closest('[data-action]');
     if(!el) return;
     const action = el.dataset.action;
