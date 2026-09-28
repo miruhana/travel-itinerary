@@ -191,6 +191,13 @@
     margin-left:auto;background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:16px;padding:2px 4px;
   }
   .event-del:hover{color:var(--rust);}
+  .event-card[data-action]{cursor:pointer;}
+  .event-edit{
+    flex:0 0 auto;background:none;border:1px solid var(--line);border-radius:var(--radius-sm);
+    color:var(--pine);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:3px 9px;
+  }
+  .event-edit:hover{border-color:var(--pine);}
+  .timeline-empty{margin-left:-84px;}
 
   .empty{
     color:var(--ink-soft);font-size:13.5px;padding:26px 4px;text-align:center;
@@ -334,6 +341,7 @@
     .timeline{padding-left:72px;}
     .timeline::before{left:52px;}
     .event-time{left:-72px;width:42px;font-size:12.5px;}
+    .timeline-empty{margin-left:-72px;}
     .balance-name{width:64px;}
     .balance-val{width:78px;}
   }
@@ -388,7 +396,7 @@ let state = {
   expenses: [],    // [{id, desc, amount, payer, splitMode:'equal'|'custom', participants:[ids], customAmounts:{id:amount}, date}]
   activeTab: 'itinerary',
   activeDay: null,
-  ui: { addingDay:false, addingEventFor:null, addingMember:false, addingExpense:false, eventIcon:'pin',
+  ui: { addingDay:false, addingEventFor:null, editingEvent:null, eventDraft:null, addingMember:false, addingExpense:false, eventIcon:'pin',
         newMemberMethod:'cash', expenseSplitMode:'equal', expenseParticipants:null, expenseCustomAmounts:{} }
 };
 
@@ -479,6 +487,7 @@ function startTripApp(tripId){
       state.activeDay = state.itinerary[0] ? state.itinerary[0].id : null;
     }
     rememberTrip(tripId, state.tripName);
+    captureEventDraft();
     render();
   }, () => setSyncStatus(false));
 }
@@ -550,6 +559,17 @@ function renderLauncher(){
       renderLauncher();
     });
   });
+}
+
+// keep what's typed in the event form across re-renders (icon pick, sync from others)
+function captureEventDraft(){
+  const evTime = document.getElementById('evTime');
+  if(!evTime) return;
+  state.ui.eventDraft = {
+    time: evTime.value,
+    title: document.getElementById('evTitle').value,
+    note: document.getElementById('evNote').value,
+  };
 }
 
 function render(){
@@ -643,19 +663,21 @@ function renderItinerary(){
           <div class="event">
             <div class="event-time mono">${esc(ev.time)}</div>
             <div class="event-dot"></div>
-            <div class="event-card">
+            ${state.ui.editingEvent === ev.id ? renderEventForm('edit') : `
+            <div class="event-card" data-action="edit-event" data-day="${day.id}" data-id="${ev.id}">
               <div class="event-top">
                 <div class="event-icon"><svg viewBox="0 0 24 24">${ICONS[ev.icon]||ICONS.pin}</svg></div>
                 <div style="flex:1;">
                   <div class="event-title">${esc(ev.title)}</div>
                   ${ev.note ? `<div class="event-note">${esc(ev.note)}</div>` : ''}
                 </div>
+                <button class="event-edit" data-action="edit-event" data-day="${day.id}" data-id="${ev.id}">編集</button>
                 <button class="event-del" data-action="del-event" data-day="${day.id}" data-id="${ev.id}">✕</button>
               </div>
-            </div>
-          </div>`).join('') : '<div class="empty" style="margin-left:-64px;">この日の予定はまだありません。</div>'}
+            </div>`}
+          </div>`).join('') : '<div class="empty timeline-empty">この日の予定はまだありません。</div>'}
       </div>
-      ${state.ui.addingEventFor === day.id ? renderEventForm() : `
+      ${state.ui.addingEventFor === day.id ? renderEventForm('add') : `
         <div class="add-trigger" data-action="toggle-add-event" data-day="${day.id}">
           <svg viewBox="0 0 24 24"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
           予定を追加
@@ -665,12 +687,13 @@ function renderItinerary(){
   return dayRow + addDayForm + body;
 }
 
-function renderEventForm(){
+function renderEventForm(mode){
+  const d = state.ui.eventDraft || { time:'09:00', title:'', note:'' };
   return `
   <div class="form-card">
     <div class="form-row">
-      <div class="form-field" style="max-width:110px;"><label>時刻</label><input type="time" id="newEventTime" value="09:00"></div>
-      <div class="form-field" style="flex:2;"><label>場所・内容</label><input type="text" id="newEventTitle" placeholder="例）浅草寺"></div>
+      <div class="form-field" style="max-width:110px;"><label>時刻</label><input type="time" id="evTime" value="${esc(d.time)}"></div>
+      <div class="form-field" style="flex:2;"><label>場所・内容</label><input type="text" id="evTitle" placeholder="例）浅草寺" value="${esc(d.title)}"></div>
     </div>
     <div class="form-row">
       <div class="form-field">
@@ -683,10 +706,12 @@ function renderEventForm(){
       </div>
     </div>
     <div class="form-row">
-      <div class="form-field"><label>メモ（任意）</label><textarea id="newEventNote" placeholder="行き方、予約番号など"></textarea></div>
+      <div class="form-field"><label>メモ（任意）</label><textarea id="evNote" placeholder="行き方、予約番号など">${esc(d.note)}</textarea></div>
     </div>
     <div class="form-actions">
-      <button class="btn pine" data-action="add-event">追加する</button>
+      ${mode === 'edit'
+        ? `<button class="btn pine" data-action="save-event">変更を保存</button>`
+        : `<button class="btn pine" data-action="add-event">追加する</button>`}
       <button class="btn ghost" data-action="cancel-add-event">キャンセル</button>
     </div>
   </div>`;
@@ -980,7 +1005,7 @@ function attachEvents(){
     const action = el.dataset.action;
 
     if(action === 'tab'){ state.activeTab = el.dataset.tab; render(); return; }
-    if(action === 'pick-day'){ state.activeDay = el.dataset.id; state.ui.addingEventFor = null; render(); return; }
+    if(action === 'pick-day'){ state.activeDay = el.dataset.id; state.ui.addingEventFor = null; state.ui.editingEvent = null; render(); return; }
 
     if(action === 'toggle-add-day'){ state.ui.addingDay = !state.ui.addingDay; render(); return; }
     if(action === 'cancel-add-day'){ state.ui.addingDay = false; render(); return; }
@@ -1000,21 +1025,50 @@ function attachEvents(){
 
     if(action === 'toggle-add-event'){
       state.ui.addingEventFor = state.ui.addingEventFor === el.dataset.day ? null : el.dataset.day;
+      state.ui.editingEvent = null;
+      state.ui.eventDraft = null;
       state.ui.eventIcon = 'pin';
       render();
       return;
     }
-    if(action === 'cancel-add-event'){ state.ui.addingEventFor = null; render(); return; }
-    if(action === 'pick-icon'){ state.ui.eventIcon = el.dataset.icon; render(); return; }
+    if(action === 'cancel-add-event'){ state.ui.addingEventFor = null; state.ui.editingEvent = null; render(); return; }
+    if(action === 'pick-icon'){ state.ui.eventIcon = el.dataset.icon; captureEventDraft(); render(); return; }
     if(action === 'add-event'){
       const day = state.itinerary.find(d => d.id === state.ui.addingEventFor);
       if(!day) return;
-      const time = document.getElementById('newEventTime').value || '00:00';
-      const title = document.getElementById('newEventTitle').value.trim();
-      const note = document.getElementById('newEventNote').value.trim();
+      const time = document.getElementById('evTime').value || '00:00';
+      const title = document.getElementById('evTitle').value.trim();
+      const note = document.getElementById('evNote').value.trim();
       if(!title) return;
       day.events.push({ id: uid(), time, title, note, icon: state.ui.eventIcon });
       state.ui.addingEventFor = null;
+      await saveItinerary();
+      render();
+      return;
+    }
+    if(action === 'edit-event'){
+      const day = state.itinerary.find(d => d.id === el.dataset.day);
+      const ev = day && day.events.find(x => x.id === el.dataset.id);
+      if(!ev) return;
+      state.ui.addingEventFor = null;
+      state.ui.editingEvent = ev.id;
+      state.ui.eventDraft = { time: ev.time, title: ev.title, note: ev.note || '' };
+      state.ui.eventIcon = ev.icon || 'pin';
+      render();
+      return;
+    }
+    if(action === 'save-event'){
+      const title = document.getElementById('evTitle').value.trim();
+      if(!title) return;
+      // look the event up again: someone else may have changed or removed it meanwhile
+      const day = state.itinerary.find(d => d.events.some(x => x.id === state.ui.editingEvent));
+      const ev = day && day.events.find(x => x.id === state.ui.editingEvent);
+      state.ui.editingEvent = null;
+      if(!ev){ render(); return; }
+      ev.time = document.getElementById('evTime').value || '00:00';
+      ev.title = title;
+      ev.note = document.getElementById('evNote').value.trim();
+      ev.icon = state.ui.eventIcon;
       await saveItinerary();
       render();
       return;
