@@ -161,14 +161,14 @@
   }
 
   /* ---------- Timeline ---------- */
-  .timeline{position:relative;padding-left:64px;}
+  .timeline{position:relative;padding-left:84px;}
   .timeline::before{
-    content:"";position:absolute;left:44px;top:6px;bottom:6px;width:1px;
+    content:"";position:absolute;left:64px;top:6px;bottom:6px;width:1px;
     background:repeating-linear-gradient(to bottom, var(--line) 0 5px, transparent 5px 10px);
   }
   .event{position:relative;margin-bottom:18px;}
   .event-time{
-    position:absolute;left:-64px;top:2px;width:56px;text-align:right;
+    position:absolute;left:-84px;top:2px;width:50px;text-align:right;
     font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px;color:var(--amber);
   }
   .event-dot{
@@ -331,8 +331,9 @@
 
   @media (max-width:480px){
     .trip-name{font-size:26px;}
-    .timeline{padding-left:56px;}
-    .event-time{left:-56px;width:48px;font-size:12.5px;}
+    .timeline{padding-left:72px;}
+    .timeline::before{left:52px;}
+    .event-time{left:-72px;width:42px;font-size:12.5px;}
     .balance-name{width:64px;}
     .balance-val{width:78px;}
   }
