@@ -313,6 +313,28 @@
   .settle-method{display:block;margin-top:2px;font-size:11.5px;color:var(--ink-soft);font-weight:500;}
   .settle-amount{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14.5px;color:var(--ink);}
 
+  .expense-edit{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;margin-left:6px;}
+  .expense-edit:hover{color:var(--pine);}
+  .pm-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;}
+  .pm-head{display:flex;align-items:center;gap:10px;padding:12px 13px;cursor:pointer;}
+  .pm-head .pm-name{font-size:14.5px;font-weight:700;flex:1;}
+  .pm-head .pm-total{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;text-align:right;}
+  .pm-sub{display:block;font-size:11.5px;color:var(--ink-soft);font-weight:500;font-family:inherit;}
+  .pm-caret{color:var(--ink-faint);transition:transform .15s;}
+  .pm-card.open .pm-caret{transform:rotate(180deg);}
+  .pm-body{display:none;border-top:1px solid var(--line);padding:10px 13px;background:var(--amber-soft);}
+  .pm-card.open .pm-body{display:block;}
+  .pm-pair{background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;margin-bottom:8px;}
+  .pm-pair:last-child{margin-bottom:0;}
+  .pm-pair-top{display:flex;justify-content:space-between;gap:8px;font-size:14px;}
+  .pm-pair-top .mono{font-weight:700;}
+  .pm-items{margin-top:6px;font-size:12px;color:var(--ink-soft);display:flex;flex-direction:column;gap:2px;}
+  .pm-item{display:flex;justify-content:space-between;gap:8px;}
+  .pm-item.out .mono{color:var(--rust);}
+  .pm-item.in .mono{color:var(--pine);}
+  .pm-sum{border-top:1px dashed var(--line);margin-top:3px;padding-top:3px;}
+  .pm-none{font-size:13px;color:var(--ink-soft);}
+
   .check-grid{display:flex;flex-wrap:wrap;gap:6px;}
   .check-pill{
     display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:20px;
@@ -397,7 +419,7 @@ let state = {
   activeTab: 'itinerary',
   activeDay: null,
   ui: { addingDay:false, addingEventFor:null, editingEvent:null, eventDraft:null, addingMember:false, addingExpense:false, eventIcon:'pin',
-        newMemberMethod:'cash', expenseSplitMode:'equal', expenseParticipants:null, expenseCustomAmounts:{} }
+        newMemberMethod:'cash', expenseSplitMode:'equal', expenseParticipants:null, expenseCustomAmounts:{}, editingExpense:null, expenseDraft:null, openSettle:{} }
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -775,6 +797,29 @@ function computeBalances(){
   });
   return bal;
 }
+/* 支出ごとの貸し借りを元データのまま二者間で集計（内訳つき・元データは変更しない） */
+function computePairs(){
+  const ids = state.members.map(m => m.id);
+  const items = {}; // items[from][to] = [{desc, amount}]  from が to に支払う分
+  ids.forEach(a => { items[a] = {}; ids.forEach(b => { if(a!==b) items[a][b] = []; }); });
+  state.expenses.forEach(ex => {
+    if(!items[ex.payer]) return;
+    const shares = {};
+    if(ex.splitMode === 'custom' && ex.customAmounts){
+      Object.entries(ex.customAmounts).forEach(([id,amt]) => { shares[id] = Number(amt) || 0; });
+    } else {
+      const parts = (ex.participants || []).filter(id => items[id]);
+      parts.forEach(id => { shares[id] = ex.amount / parts.length; });
+    }
+    Object.entries(shares).forEach(([id, amt]) => {
+      if(id === ex.payer || !items[id] || amt <= 0) return;
+      items[id][ex.payer].push({ desc: ex.desc, amount: amt });
+    });
+  });
+  return items;
+}
+function sumItems(list){ return list.reduce((s,i) => s + i.amount, 0); }
+
 function simplifyDebts(bal){
   const creditors = [], debtors = [];
   Object.entries(bal).forEach(([id,amt]) => {
@@ -822,6 +867,7 @@ function renderSettlement(){
         </div>
         <div style="display:flex;align-items:center;">
           <div class="expense-amount mono">${yen(ex.amount)}</div>
+          <button class="expense-edit" data-action="edit-expense" data-id="${ex.id}" title="編集">✎</button>
           <button class="expense-del" data-action="del-expense" data-id="${ex.id}">✕</button>
         </div>
       </div>
@@ -848,17 +894,44 @@ function renderSettlement(){
         }).join('')}
       </div>`;
 
-    const tx = simplifyDebts(bal);
-    settleSection = tx.length ? `
-      <div class="settle-list">
-        ${tx.map(t => `
-          <div class="settle-row">
-            <div class="settle-text"><b>${esc(memberName(t.from))}</b> が <b>${esc(memberName(t.to))}</b> に支払う
-              <span class="settle-method">受け取り方法: ${memberMethodLabel(t.to)}</span>
-            </div>
-            <div class="settle-amount mono">${yen(t.amount)}</div>
-          </div>`).join('')}
-      </div>` : `<div class="empty">現在、清算の必要はありません。</div>`;
+    const pairs = computePairs();
+    settleSection = state.members.map(m => {
+      const paidTotal = state.expenses.filter(ex => ex.payer === m.id).reduce((s,ex) => s + ex.amount, 0);
+      const open = !!(state.ui.openSettle || {})[m.id];
+      let pay = 0, recv = 0;
+      const pairHtml = state.members.filter(o => o.id !== m.id).map(o => {
+        const out = pairs[m.id][o.id], inn = pairs[o.id][m.id];
+        if(!out.length && !inn.length) return '';
+        const outSum = sumItems(out), inSum = sumItems(inn);
+        const n = Math.round(outSum - inSum);
+        if(n > 0) pay += n; else recv += -n;
+        const line = n > 0
+          ? `<b>${esc(m.name)}</b> が <b>${esc(o.name)}</b> に支払う`
+          : n < 0 ? `<b>${esc(o.name)}</b> が <b>${esc(m.name)}</b> に支払う` : `${esc(o.name)} との貸し借りなし`;
+        const rows = [
+          ...out.map(i => ({...i, dir:'out'})), ...inn.map(i => ({...i, dir:'in'}))
+        ].map(i => `<div class="pm-item ${i.dir}"><span>${esc(i.desc)}（${i.dir==='out' ? `${esc(o.name)}が立替・${esc(m.name)}の負担` : `${esc(m.name)}が立替・${esc(o.name)}の負担`}）</span><span class="mono">${i.dir==='out'?'−':'＋'}${yen(i.amount)}</span></div>`).join('');
+        return `<div class="pm-pair">
+          <div class="pm-pair-top"><span>${line}</span><span class="mono">${yen(Math.abs(n))}</span></div>
+          <div class="pm-items">
+            ${rows}
+            <div class="pm-item pm-sum"><span>${esc(m.name)}の負担 合計</span><span class="mono">${yen(outSum)}</span></div>
+            <div class="pm-item"><span>${esc(o.name)}の負担 合計</span><span class="mono">${yen(inSum)}</span></div>
+            <div class="pm-item"><span>差引</span><span class="mono">${yen(Math.abs(n))}</span></div>
+            ${n > 0 ? `<div class="pm-item"><span>${esc(o.name)}の受け取り方法</span><span>${memberMethodLabel(o.id)}</span></div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+      const sub = pay || recv ? (pay >= recv ? `差引 ${yen(pay-recv)} 支払う` : `差引 ${yen(recv-pay)} 受け取る`) : '貸し借りなし';
+      return `<div class="pm-card ${open?'open':''}">
+        <div class="pm-head" data-action="toggle-settle" data-id="${m.id}">
+          <div class="pm-name">${esc(m.name)}<span class="pm-sub">${sub}</span></div>
+          <div class="pm-total">${yen(paidTotal)}<span class="pm-sub">支出合計</span></div>
+          <span class="pm-caret">▾</span>
+        </div>
+        <div class="pm-body">${pairHtml || '<div class="pm-none">この人に関わる貸し借りはありません。</div>'}</div>
+      </div>`;
+    }).join('');
   } else {
     balanceSection = `<div class="empty">メンバーを追加すると集計が表示されます。</div>`;
   }
@@ -869,7 +942,7 @@ function renderSettlement(){
     ${expenseList}
     <div class="section-title">現在の収支</div>
     ${balanceSection}
-    <div class="section-title">最終清算（誰が誰にいくら払うか）</div>
+    <div class="section-title">最終清算（メンバーをタップで内訳）</div>
     ${settleSection}
   `;
 }
@@ -878,6 +951,8 @@ function renderExpenseForm(){
   if(!state.members.length){
     return `<div class="form-card">先に「メンバー」タブから旅行メンバーを追加してください。</div>`;
   }
+  const editing = state.ui.editingExpense ? state.expenses.find(e => e.id === state.ui.editingExpense) : null;
+  const dr = state.ui.expenseDraft || (editing ? { desc: editing.desc, payer: editing.payer, date: editing.date || '', amount: editing.splitMode === 'custom' ? '' : editing.amount } : {});
   const mode = state.ui.expenseSplitMode || 'equal';
   const sel = state.ui.expenseParticipants || state.members.map(m => m.id);
   const customAmounts = state.ui.expenseCustomAmounts || {};
@@ -885,15 +960,15 @@ function renderExpenseForm(){
 
   const commonTop = `
     <div class="form-row">
-      <div class="form-field" style="flex:2;"><label>内容</label><input type="text" id="newExpDesc" placeholder="例）新幹線チケット"></div>
+      <div class="form-field" style="flex:2;"><label>内容</label><input type="text" id="newExpDesc" placeholder="例）新幹線チケット" value="${esc(dr.desc||'')}"></div>
       <div class="form-field"><label>支払った人</label>
         <select id="newExpPayer">
-          ${state.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+          ${state.members.map(m => `<option value="${m.id}" ${dr.payer===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}
         </select>
       </div>
     </div>
     <div class="form-row">
-      <div class="form-field" style="max-width:160px;"><label>日付（任意）</label><input type="date" id="newExpDate"></div>
+      <div class="form-field" style="max-width:160px;"><label>日付（任意）</label><input type="date" id="newExpDate" value="${esc(dr.date||'')}"></div>
     </div>
     <div class="form-row">
       <div class="form-field">
@@ -907,7 +982,7 @@ function renderExpenseForm(){
 
   const equalFields = `
     <div class="form-row">
-      <div class="form-field"><label>合計金額（円）</label><input type="number" id="newExpAmount" min="0" placeholder="12000"></div>
+      <div class="form-field"><label>合計金額（円）</label><input type="number" id="newExpAmount" min="0" placeholder="12000" value="${dr.amount||''}"></div>
     </div>
     <div class="form-row">
       <div class="form-field">
@@ -943,7 +1018,7 @@ function renderExpenseForm(){
     ${commonTop}
     ${mode === 'custom' ? customFields : equalFields}
     <div class="form-actions">
-      <button class="btn rust" data-action="add-expense">記録する</button>
+      <button class="btn rust" data-action="add-expense">${editing ? '更新する' : '記録する'}</button>
       <button class="btn ghost" data-action="cancel-add-expense">キャンセル</button>
     </div>
   </div>`;
@@ -1102,7 +1177,27 @@ function attachEvents(){
       return;
     }
 
+    if(action === 'toggle-settle'){
+      state.ui.openSettle = state.ui.openSettle || {};
+      state.ui.openSettle[el.dataset.id] = !state.ui.openSettle[el.dataset.id];
+      render();
+      return;
+    }
+    if(action === 'edit-expense'){
+      const ex = state.expenses.find(e => e.id === el.dataset.id);
+      if(!ex) return;
+      state.ui.addingExpense = true;
+      state.ui.editingExpense = ex.id;
+      state.ui.expenseDraft = null;
+      state.ui.expenseSplitMode = ex.splitMode === 'custom' ? 'custom' : 'equal';
+      state.ui.expenseParticipants = [...(ex.participants || [])];
+      state.ui.expenseCustomAmounts = ex.splitMode === 'custom' ? {...ex.customAmounts} : {};
+      render();
+      return;
+    }
     if(action === 'toggle-add-expense'){
+      state.ui.editingExpense = null;
+      state.ui.expenseDraft = null;
       state.ui.addingExpense = true;
       state.ui.expenseSplitMode = 'equal';
       state.ui.expenseParticipants = state.members.map(m => m.id);
@@ -1110,13 +1205,15 @@ function attachEvents(){
       render();
       return;
     }
-    if(action === 'cancel-add-expense'){ state.ui.addingExpense = false; render(); return; }
+    if(action === 'cancel-add-expense'){ state.ui.addingExpense = false; state.ui.editingExpense = null; state.ui.expenseDraft = null; render(); return; }
     if(action === 'set-split-mode'){
+      captureExpenseDraft();
       state.ui.expenseSplitMode = el.dataset.mode;
       render();
       return;
     }
     if(action === 'toggle-participant'){
+      captureExpenseDraft();
       const id = el.dataset.id;
       const cur = state.ui.expenseParticipants || state.members.map(m => m.id);
       state.ui.expenseParticipants = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
@@ -1139,14 +1236,16 @@ function attachEvents(){
           if(v > 0){ customAmounts[id] = v; total += v; }
         });
         if(!Object.keys(customAmounts).length || total <= 0) return;
-        state.expenses.push({ id: uid(), desc, amount: total, payer, splitMode: 'custom', participants: Object.keys(customAmounts), customAmounts, date });
+        upsertExpense({ desc, amount: total, payer, splitMode: 'custom', participants: Object.keys(customAmounts), customAmounts, date });
       } else {
         const amount = parseFloat(document.getElementById('newExpAmount').value);
         const participants = state.ui.expenseParticipants || [];
         if(!amount || amount <= 0 || !participants.length) return;
-        state.expenses.push({ id: uid(), desc, amount, payer, splitMode: 'equal', participants, date });
+        upsertExpense({ desc, amount, payer, splitMode: 'equal', participants, date });
       }
       state.ui.addingExpense = false;
+      state.ui.editingExpense = null;
+      state.ui.expenseDraft = null;
       await saveExpenses();
       render();
       return;
@@ -1158,6 +1257,21 @@ function attachEvents(){
       return;
     }
   });
+}
+
+function captureExpenseDraft(){
+  const g = id => document.getElementById(id);
+  if(!g('newExpDesc')) return;
+  state.ui.expenseDraft = {
+    desc: g('newExpDesc').value, payer: g('newExpPayer').value, date: g('newExpDate').value,
+    amount: g('newExpAmount') ? g('newExpAmount').value : (state.ui.expenseDraft || {}).amount
+  };
+}
+function upsertExpense(data){
+  const id = state.ui.editingExpense;
+  const i = id ? state.expenses.findIndex(e => e.id === id) : -1;
+  if(i >= 0) state.expenses[i] = { ...state.expenses[i], ...data };
+  else state.expenses.push({ id: uid(), ...data });
 }
 
 boot();
