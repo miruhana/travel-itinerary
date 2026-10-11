@@ -324,14 +324,32 @@
   .pm-card.open .pm-caret{transform:rotate(180deg);}
   .pm-body{display:none;border-top:1px solid var(--line);padding:10px 13px;background:var(--amber-soft);}
   .pm-card.open .pm-body{display:block;}
-  .pm-pair{background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;margin-bottom:8px;}
+  .pm-pair{--tone:var(--line);--tone-bg:#fff;--tone-ink:var(--ink);background:var(--tone-bg);border:1px solid var(--tone);border-left:5px solid var(--tone-ink);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;}
+  .pm-pair.pay{--tone:#F0C9BE;--tone-bg:#FFF4F0;--tone-ink:#C2573A;}
+  .pm-pair.recv{--tone:#BFDDCB;--tone-bg:#F0F9F3;--tone-ink:#2F7D55;}
+  .pm-pair.even{--tone-bg:#F4F5F7;--tone-ink:#8A94A3;}
+  .pm-badge{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--tone-ink);border-radius:20px;padding:2px 9px;margin-right:6px;vertical-align:1px;}
+  .pm-pair-top .mono{color:var(--tone-ink);font-size:16px;}
+  .pm-pair.done{opacity:.8;}
+  .pm-pair.done .pm-pair-top .mono{text-decoration:line-through;}
+  .pm-confirm{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--tone);align-items:center;}
+  .pm-step{flex:1 1 130px;display:flex;align-items:center;justify-content:space-between;gap:6px;background:rgba(255,255,255,.7);border:1px solid var(--tone);border-radius:var(--radius-sm);padding:6px 8px;font-size:12px;}
+  .pm-step.on{background:var(--tone-ink);border-color:var(--tone-ink);color:#fff;}
+  .pm-btn{border:1px solid var(--tone-ink);background:#fff;color:var(--tone-ink);border-radius:20px;font-size:12px;font-weight:700;padding:5px 11px;cursor:pointer;font-family:inherit;}
+  .pm-btn:hover{background:var(--tone-ink);color:#fff;}
+  .pm-step.on .pm-btn{background:transparent;color:#fff;border-color:rgba(255,255,255,.7);font-weight:500;}
+  .pm-done-banner{width:100%;font-size:13px;font-weight:700;color:var(--tone-ink);}
+  .pm-warn{width:100%;font-size:12px;color:#B3541E;}
   .pm-pair:last-child{margin-bottom:0;}
   .pm-pair-top{display:flex;justify-content:space-between;gap:8px;font-size:14px;}
   .pm-pair-top .mono{font-weight:700;}
   .pm-items{margin-top:6px;font-size:12px;color:var(--ink-soft);display:flex;flex-direction:column;gap:2px;}
   .pm-item{display:flex;justify-content:space-between;gap:8px;}
-  .pm-item.out .mono{color:var(--rust);}
-  .pm-item.in .mono{color:var(--pine);}
+  .pm-item.out,.pm-item.in{border-radius:6px;padding:3px 8px;align-items:center;}
+  .pm-item.out{background:#FBE3DB;color:#8E3A22;}
+  .pm-item.in{background:#DDF0E5;color:#1E5C3C;}
+  .pm-item.out .mono{color:#C2573A;}
+  .pm-item.in .mono{color:#2F7D55;}
   .pm-sum{border-top:1px dashed var(--line);margin-top:3px;padding-top:3px;}
   .pm-none{font-size:13px;color:var(--ink-soft);}
 
@@ -415,6 +433,7 @@ let state = {
   tripName: '新しい旅行',
   members: [],
   itinerary: [],   // [{id, date, label, events:[{id,time,title,note,icon}]}]
+  settlements: {}, // {'fromId_toId': {amount, paid, received}}
   expenses: [],    // [{id, desc, amount, payer, splitMode:'equal'|'custom', participants:[ids], customAmounts:{id:amount}, date}]
   activeTab: 'itinerary',
   activeDay: null,
@@ -465,7 +484,7 @@ const FIREBASE_READY = firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_
 let tripRef = null;
 
 function defaultTripData(){
-  return { tripName: state.tripName, members: [], itinerary: [], expenses: [] };
+  return { tripName: state.tripName, members: [], itinerary: [], expenses: [], settlements: {} };
 }
 
 function setSyncStatus(ok){
@@ -505,6 +524,7 @@ function startTripApp(tripId){
     state.members = Array.isArray(data.members) ? data.members : [];
     state.itinerary = Array.isArray(data.itinerary) ? data.itinerary : [];
     state.expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    state.settlements = (data.settlements && typeof data.settlements === 'object') ? data.settlements : {};
     if(!state.activeDay || !state.itinerary.find(d => d.id === state.activeDay)){
       state.activeDay = state.itinerary[0] ? state.itinerary[0].id : null;
     }
@@ -526,6 +546,7 @@ function saveMeta(){
 }
 function saveMembers(){ return saveField('members', state.members); }
 function saveItinerary(){ return saveField('itinerary', state.itinerary); }
+function saveSettlements(){ return saveField('settlements', state.settlements); }
 function saveExpenses(){ return saveField('expenses', state.expenses); }
 
 /* ---------------- render ---------------- */
@@ -911,8 +932,27 @@ function renderSettlement(){
         const rows = [
           ...out.map(i => ({...i, dir:'out'})), ...inn.map(i => ({...i, dir:'in'}))
         ].map(i => `<div class="pm-item ${i.dir}"><span>${esc(i.desc)}（${i.dir==='out' ? `${esc(o.name)}が立替・${esc(m.name)}の負担` : `${esc(m.name)}が立替・${esc(o.name)}の負担`}）</span><span class="mono">${i.dir==='out'?'−':'＋'}${yen(i.amount)}</span></div>`).join('');
-        return `<div class="pm-pair">
-          <div class="pm-pair-top"><span>${line}</span><span class="mono">${yen(Math.abs(n))}</span></div>
+        const from = n > 0 ? m.id : o.id, to = n > 0 ? o.id : m.id;
+        const key = from + '_' + to;
+        const st = (state.settlements || {})[key];
+        const valid = n !== 0 && st && Math.round(st.amount) === Math.abs(n);
+        const paid = valid && st.paid, received = valid && st.received;
+        const complete = paid && received;
+        const tone = n > 0 ? 'pay' : n < 0 ? 'recv' : 'even';
+        const badge = n > 0 ? '支払う' : n < 0 ? '受け取る' : '';
+        const step = (on, label, doneLabel, who, act) => `<div class="pm-step ${on?'on':''}">
+              <span>${on ? '✓ ' + doneLabel : label}</span>
+              ${on ? `<button class="pm-btn" data-action="settle-undo" data-key="${key}" data-field="${act}" data-amount="${Math.abs(n)}">取り消し</button>`
+                   : `<button class="pm-btn" data-action="settle-mark" data-key="${key}" data-field="${act}" data-amount="${Math.abs(n)}">${who}</button>`}
+            </div>`;
+        const confirm = n === 0 ? '' : `<div class="pm-confirm">
+            ${complete ? `<div class="pm-done-banner">✓ 清算完了</div>` : ''}
+            ${step(paid, `${esc(memberName(from))}：未払い`, `${esc(memberName(from))}が支払い済み`, '支払った', 'paid')}
+            ${step(received, `${esc(memberName(to))}：未受取`, `${esc(memberName(to))}が受け取り済み`, '受け取った', 'received')}
+            ${st && !valid ? `<div class="pm-warn">※ 確認後に金額が変わりました。もう一度確認してください。</div>` : ''}
+          </div>`;
+        return `<div class="pm-pair ${tone} ${complete?'done':''}">
+          <div class="pm-pair-top"><span>${badge ? `<span class="pm-badge">${badge}</span>` : ''}${line}</span><span class="mono">${yen(Math.abs(n))}</span></div>
           <div class="pm-items">
             ${rows}
             <div class="pm-item pm-sum"><span>${esc(m.name)}の負担 合計</span><span class="mono">${yen(outSum)}</span></div>
@@ -920,6 +960,7 @@ function renderSettlement(){
             <div class="pm-item"><span>差引</span><span class="mono">${yen(Math.abs(n))}</span></div>
             ${n > 0 ? `<div class="pm-item"><span>${esc(o.name)}の受け取り方法</span><span>${memberMethodLabel(o.id)}</span></div>` : ''}
           </div>
+          ${confirm}
         </div>`;
       }).join('');
       const sub = pay || recv ? (pay >= recv ? `差引 ${yen(pay-recv)} 支払う` : `差引 ${yen(recv-pay)} 受け取る`) : '貸し借りなし';
@@ -1177,6 +1218,16 @@ function attachEvents(){
       return;
     }
 
+    if(action === 'settle-mark' || action === 'settle-undo'){
+      const key = el.dataset.key, field = el.dataset.field, amount = Number(el.dataset.amount);
+      const cur = (state.settlements || {})[key];
+      const base = (cur && Math.round(cur.amount) === amount) ? cur : { amount, paid:false, received:false };
+      if(action === 'settle-undo' && !confirm('この確認を取り消しますか？')) return;
+      state.settlements = { ...(state.settlements || {}), [key]: { ...base, [field]: action === 'settle-mark' } };
+      await saveSettlements();
+      render();
+      return;
+    }
     if(action === 'toggle-settle'){
       state.ui.openSettle = state.ui.openSettle || {};
       state.ui.openSettle[el.dataset.id] = !state.ui.openSettle[el.dataset.id];
