@@ -350,6 +350,11 @@
   .pm-item.in{background:#DDF0E5;color:#1E5C3C;}
   .pm-item.out .mono{color:#C2573A;}
   .pm-item.in .mono{color:#2F7D55;}
+  .pm-check{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:7px;border:1.5px solid currentColor;border-radius:5px;background:#fff;color:inherit;font-size:12px;font-weight:700;line-height:1;cursor:pointer;vertical-align:-4px;flex:0 0 auto;}
+  .pm-check.on{background:#233A55;border-color:#233A55;color:#fff;}
+  .pm-item.paid{opacity:.55;}
+  .pm-item.paid .mono{text-decoration:line-through;}
+  .pm-hint{font-size:11px;color:var(--ink-faint);margin:4px 0 2px;}
   .pm-sum{border-top:1px dashed var(--line);margin-top:3px;padding-top:3px;}
   .pm-none{font-size:13px;color:var(--ink-soft);}
 
@@ -437,6 +442,7 @@ let state = {
   tripName: '新しい旅行',
   members: [],
   itinerary: [],   // [{id, date, label, events:[{id,time,title,note,icon}]}]
+  paidItems: {},  // 途中清算: {'expenseId_debtorId': true} チェック済み＝支払い済み
   settlements: {}, // {'fromId_toId': {amount, paid, received}}
   expenses: [],    // [{id, desc, amount, payer, splitMode:'equal'|'custom', participants:[ids], customAmounts:{id:amount}, date}]
   activeTab: 'itinerary',
@@ -501,7 +507,7 @@ const FIREBASE_READY = firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_
 let tripRef = null;
 
 function defaultTripData(){
-  return { tripName: state.tripName, members: [], itinerary: [], expenses: [], settlements: {} };
+  return { tripName: state.tripName, members: [], itinerary: [], expenses: [], settlements: {}, paidItems: {} };
 }
 
 function setSyncStatus(ok){
@@ -541,6 +547,7 @@ function startTripApp(tripId){
     state.members = Array.isArray(data.members) ? data.members : [];
     state.itinerary = Array.isArray(data.itinerary) ? data.itinerary : [];
     state.expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    state.paidItems = (data.paidItems && typeof data.paidItems === 'object') ? data.paidItems : {};
     state.settlements = (data.settlements && typeof data.settlements === 'object') ? data.settlements : {};
     if(!state.activeDay || !state.itinerary.find(d => d.id === state.activeDay)){
       state.activeDay = state.itinerary[0] ? state.itinerary[0].id : null;
@@ -563,6 +570,7 @@ function saveMeta(){
 }
 function saveMembers(){ return saveField('members', state.members); }
 function saveItinerary(){ return saveField('itinerary', state.itinerary); }
+function savePaidItems(){ return saveField('paidItems', state.paidItems); }
 function saveSettlements(){ return saveField('settlements', state.settlements); }
 function saveExpenses(){ return saveField('expenses', state.expenses); }
 
@@ -854,12 +862,13 @@ function computePairs(){
     }
     Object.entries(shares).forEach(([id, amt]) => {
       if(id === ex.payer || !items[id] || amt <= 0) return;
-      items[id][ex.payer].push({ desc: ex.desc, amount: amt });
+      items[id][ex.payer].push({ desc: ex.desc, amount: amt, key: ex.id + '_' + id, paid: !!(state.paidItems || {})[ex.id + '_' + id] });
     });
   });
   return items;
 }
 function sumItems(list){ return list.reduce((s,i) => s + i.amount, 0); }
+function sumUnpaid(list){ return list.reduce((s,i) => s + (i.paid ? 0 : i.amount), 0); }
 
 function simplifyDebts(bal){
   const creditors = [], debtors = [];
@@ -943,15 +952,16 @@ function renderSettlement(){
       const pairHtml = state.members.filter(o => o.id !== m.id).map(o => {
         const out = pairs[m.id][o.id], inn = pairs[o.id][m.id];
         if(!out.length && !inn.length) return '';
-        const outSum = sumItems(out), inSum = sumItems(inn);
+        const outSum = sumUnpaid(out), inSum = sumUnpaid(inn);
+        const paidSum = sumItems(out) - outSum + sumItems(inn) - inSum;
         const n = Math.round(outSum - inSum);
         if(n > 0) pay += n; else recv += -n;
         const line = n > 0
           ? `<b>${esc(m.name)}</b> が <b>${esc(o.name)}</b> に支払う`
-          : n < 0 ? `<b>${esc(o.name)}</b> が <b>${esc(m.name)}</b> に支払う` : `${esc(o.name)} との貸し借りなし`;
+          : n < 0 ? `<b>${esc(o.name)}</b> が <b>${esc(m.name)}</b> に支払う` : (paidSum > 0 ? `${esc(o.name)} との清算は完了` : `${esc(o.name)} との貸し借りなし`);
         const rows = [
           ...out.map(i => ({...i, dir:'out'})), ...inn.map(i => ({...i, dir:'in'}))
-        ].map(i => `<div class="pm-item ${i.dir}"><span>${esc(i.desc)}（${i.dir==='out' ? `${esc(o.name)}が立替・${esc(m.name)}の負担` : `${esc(m.name)}が立替・${esc(o.name)}の負担`}）</span><span class="mono">${i.dir==='out'?'−':'＋'}${yen(i.amount)}</span></div>`).join('');
+        ].map(i => `<div class="pm-item ${i.dir} ${i.paid?'paid':''}"><span><span class="pm-check ${i.paid?'on':''}" data-action="toggle-paid-item" data-key="${i.key}" role="checkbox" aria-checked="${i.paid}" title="途中で支払い済みならチェック">${i.paid?'✓':''}</span>${i.paid?'<b>【支払済】</b>':''}${esc(i.desc)}（${i.dir==='out' ? `${esc(o.name)}が立替・${esc(m.name)}の負担` : `${esc(m.name)}が立替・${esc(o.name)}の負担`}）</span><span class="mono">${i.dir==='out'?'−':'＋'}${yen(i.amount)}</span></div>`).join('');
         const from = n > 0 ? m.id : o.id, to = n > 0 ? o.id : m.id;
         const key = from + '_' + to;
         const st = (state.settlements || {})[key];
@@ -975,8 +985,10 @@ function renderSettlement(){
           <div class="pm-pair-top"><span>${badge ? `<span class="pm-badge">${badge}</span>` : ''}${line}</span><span class="mono">${yen(Math.abs(n))}</span></div>
           <div class="pm-items">
             ${rows}
-            <div class="pm-item pm-sum"><span>${esc(m.name)}の負担 合計</span><span class="mono">${yen(outSum)}</span></div>
-            <div class="pm-item"><span>${esc(o.name)}の負担 合計</span><span class="mono">${yen(inSum)}</span></div>
+            <div class="pm-hint">□ にチェックを入れると、その分を途中で支払い済みとして差引から除きます。</div>
+            <div class="pm-item pm-sum"><span>${esc(m.name)}の負担 合計（未払い）</span><span class="mono">${yen(outSum)}</span></div>
+            <div class="pm-item"><span>${esc(o.name)}の負担 合計（未払い）</span><span class="mono">${yen(inSum)}</span></div>
+            ${paidSum > 0 ? `<div class="pm-item"><span>途中清算済み（差引に含まず）</span><span class="mono">${yen(paidSum)}</span></div>` : ''}
             <div class="pm-item"><span>差引</span><span class="mono">${yen(Math.abs(n))}</span></div>
             ${n > 0 ? `<div class="pm-item"><span>${esc(o.name)}の受け取り方法</span><span>${memberMethodLabel(o.id)}</span></div>` : ''}
           </div>
@@ -1248,6 +1260,15 @@ function attachEvents(){
       if(action === 'settle-undo' && !confirm('この確認を取り消しますか？')) return;
       state.settlements = { ...(state.settlements || {}), [key]: { ...base, [field]: action === 'settle-mark' } };
       await saveSettlements();
+      render();
+      return;
+    }
+    if(action === 'toggle-paid-item'){
+      const key = el.dataset.key;
+      const next = { ...(state.paidItems || {}) };
+      if(next[key]) delete next[key]; else next[key] = true;
+      state.paidItems = next;
+      await savePaidItems();
       render();
       return;
     }
